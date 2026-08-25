@@ -1,0 +1,20 @@
+{
+  "patient_id": "PT-CLINICAL-001",
+  "age": 72,
+  "wbc_count": 17.5,
+  "serum_creatinine": 1.8,
+  "baseline_creatinine": 1.0,
+  "prior_cdi_episodes": 1,
+  "concomitant_antibiotics": true,
+  "immunocompromised": false,
+  "ppi_use": true,
+  "serum_albumin": 2.9,
+  "chronic_kidney_disease": false,
+  "inpatient_or_nursing_home": true,
+  "hypotension_or_shock": false,
+  "ileus_present": false,
+  "toxic_megacolon": false,
+  "serum_lactate": 2.2,
+  "history_congestive_heart_failure": false,
+  "prior_treatment_regimen": "vancomycin"
+}
