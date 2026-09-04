@@ -8,7 +8,9 @@ import argparse
 import json
 import sys
 import os
+import csv
 from pathlib import Path
+from typing import Optional, Dict, Any, List
 
 # Add parent directory to path if needed
 sys.path.insert(0, str(Path(__file__).parent.resolve()))
@@ -176,15 +178,89 @@ def run_interactive_mode() -> PatientInput:
     )
 
 
+def run_batch_evaluation(input_path: str, output_path: Optional[str] = None, json_output: bool = False):
+    """Execute batch evaluation from CSV and write optional CSV or print results."""
+    if not os.path.exists(input_path):
+        print(f"Error: CSV file '{input_path}' not found.", file=sys.stderr)
+        sys.exit(1)
+
+    with open(input_path, "r", encoding="utf-8") as f:
+        csv_text = f.read()
+
+    reports = CDiffRecurrenceEngine.evaluate_batch_csv(csv_text)
+
+    if output_path:
+        # Write batch output CSV
+        fieldnames = [
+            "patient_id",
+            "age",
+            "wbc_count",
+            "serum_creatinine",
+            "prior_cdi_episodes",
+            "severity_grade",
+            "is_severe",
+            "is_fulminant",
+            "risk_category",
+            "risk_score",
+            "predicted_recurrence_probability",
+            "recurrent_episode_type",
+            "primary_regimen",
+            "primary_dosage",
+            "primary_duration",
+            "bezlotoxumab_indicated",
+            "fmt_candidacy"
+        ]
+        with open(output_path, "w", newline="", encoding="utf-8") as f_out:
+            writer = csv.DictWriter(f_out, fieldnames=fieldnames)
+            writer.writeheader()
+            for rep in reports:
+                writer.writerow({
+                    "patient_id": rep.patient_id,
+                    "age": rep.patient_input.age,
+                    "wbc_count": rep.patient_input.wbc_count,
+                    "serum_creatinine": rep.patient_input.serum_creatinine,
+                    "prior_cdi_episodes": rep.patient_input.prior_cdi_episodes,
+                    "severity_grade": rep.severity.severity_grade,
+                    "is_severe": rep.severity.is_severe,
+                    "is_fulminant": rep.severity.is_fulminant,
+                    "risk_category": rep.recurrence_risk.risk_category,
+                    "risk_score": rep.recurrence_risk.risk_score,
+                    "predicted_recurrence_probability": rep.recurrence_risk.predicted_recurrence_probability,
+                    "recurrent_episode_type": rep.recurrence_risk.recurrent_episode_type,
+                    "primary_regimen": rep.treatment.primary_regimen,
+                    "primary_dosage": rep.treatment.primary_dosage,
+                    "primary_duration": rep.treatment.primary_duration,
+                    "bezlotoxumab_indicated": rep.treatment.bezlotoxumab_indicated,
+                    "fmt_candidacy": rep.treatment.fmt_candidacy
+                })
+        print(f"Batch evaluation completed successfully. Results saved to {output_path} ({len(reports)} records).")
+    elif json_output:
+        print(json.dumps([r.to_dict() for r in reports], indent=2))
+    else:
+        for rep in reports:
+            print(format_report_text(rep))
+            print("\n")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Clostridioides difficile Recurrence Risk & Clinical Severity Evaluation Agent",
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
 
+    subparsers = parser.add_subparsers(dest="command", help="Sub-commands")
+
+    # Batch subcommand
+    batch_parser = subparsers.add_parser("batch", help="Batch process patient records from CSV")
+    batch_parser.add_argument("-i", "--input", "--csv", dest="input_file", required=True, help="Input CSV file path")
+    batch_parser.add_argument("-o", "--output", dest="output_file", default=None, help="Output CSV file path (optional)")
+    batch_parser.add_argument("--json", action="store_true", help="Output results in structured JSON format")
+
+    # Single evaluation / root flags
     parser.add_argument("-i", "--interactive", action="store_true", help="Launch interactive clinical question mode")
     parser.add_argument("--json", action="store_true", help="Output results in structured JSON format")
     parser.add_argument("--csv", type=str, help="Path to batch CSV file containing patient records")
+    parser.add_argument("-o", "--output", dest="output_file", default=None, help="Output CSV file path for batch mode")
 
     # Direct Clinical Arguments
     parser.add_argument("--patient-id", type=str, default="PATIENT-001", help="Patient Identifier")
@@ -208,19 +284,12 @@ def main():
 
     args = parser.parse_args()
 
+    if args.command == "batch":
+        run_batch_evaluation(args.input_file, args.output_file, json_output=args.json)
+        return
+
     if args.csv:
-        if not os.path.exists(args.csv):
-            print(f"Error: CSV file '{args.csv}' not found.", file=sys.stderr)
-            sys.exit(1)
-        with open(args.csv, "r", encoding="utf-8") as f:
-            csv_text = f.read()
-        reports = CDiffRecurrenceEngine.evaluate_batch_csv(csv_text)
-        if args.json:
-            print(json.dumps([r.to_dict() for r in reports], indent=2))
-        else:
-            for rep in reports:
-                print(format_report_text(rep))
-                print("\n")
+        run_batch_evaluation(args.csv, getattr(args, "output_file", None), json_output=args.json)
         return
 
     if args.interactive:
