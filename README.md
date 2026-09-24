@@ -1,5 +1,7 @@
 # C. difficile Recurrence & Severity Tool
 
+### [Open the Live Application →](https://abusuraihsakhri.github.io/clostridium-difficile-recurrence-agent/)
+
 A deterministic decision-support tool for adult *Clostridioides difficile* infection (CDI). It classifies disease severity using the IDSA/SHEA adult framework, summarizes guideline-referenced treatment options, and reports a repository-specific recurrence-risk heuristic.
 
 > **Clinical scope:** adults aged 18 years or older. This software is for educational, research, and decision-support use. It does not diagnose CDI, replace clinician assessment, or provide patient-specific prescribing advice.
