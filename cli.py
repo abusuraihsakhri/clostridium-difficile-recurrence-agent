@@ -143,10 +143,10 @@ def run_interactive_mode() -> PatientInput:
     prior_eps = ask_int("Number of prior CDI episodes (0=primary, 1=1st recurrence, >=2=multiple)", 0)
     abx = ask_bool("Concomitant non-CDI systemic antibiotics?", False)
     immuno = ask_bool("Immunocompromised host (chemo/transplant/steroids)?", False)
-    ppi = ask_bool("Ongoing PPI / acid suppressive therapy?", True)
+    ppi = ask_bool("Ongoing PPI / acid suppressive therapy?", False)
     alb = ask_opt_float("Serum Albumin (g/dL)")
     ckd = ask_bool("Chronic Kidney Disease (Stage >= 3)?", False)
-    ltcf = ask_bool("Inpatient or Long-term Care Facility?", True)
+    ltcf = ask_bool("Inpatient or Long-term Care Facility?", False)
     shock = ask_bool("Hypotension or vasopressor requirement?", False)
     ileus = ask_bool("Paralytic ileus present?", False)
     mega = ask_bool("Toxic megacolon present?", False)
@@ -187,7 +187,11 @@ def run_batch_evaluation(input_path: str, output_path: Optional[str] = None, jso
     with open(input_path, "r", encoding="utf-8") as f:
         csv_text = f.read()
 
-    reports = CDiffRecurrenceEngine.evaluate_batch_csv(csv_text)
+    try:
+        reports = CDiffRecurrenceEngine.evaluate_batch_csv(csv_text)
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        sys.exit(2)
 
     if output_path:
         # Write batch output CSV
@@ -244,7 +248,7 @@ def run_batch_evaluation(input_path: str, output_path: Optional[str] = None, jso
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Clostridioides difficile Recurrence Risk & Clinical Severity Evaluation Agent",
+        description="Adult Clostridioides difficile severity and recurrence-risk decision-support tool",
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
 
@@ -267,18 +271,23 @@ def main():
     parser.add_argument("--age", type=int, default=65, help="Patient age in years")
     parser.add_argument("--wbc", type=float, default=12.0, help="White blood cell count (x10^3/uL)")
     parser.add_argument("--creatinine", type=float, default=1.2, help="Serum creatinine (mg/dL)")
-    parser.add_argument("--baseline-creatinine", type=float, default=None, help="Baseline serum creatinine (mg/dL)")
+    parser.add_argument("--baseline-creatinine", type=float, default=None, help="Baseline serum creatinine (mg/dL; reported for context, not used in IDSA/SHEA severity classification)")
     parser.add_argument("--prior-episodes", type=int, default=0, help="Number of prior CDI episodes (0=primary, 1=first recurrence, 2+=multiple)")
     parser.add_argument("--concomitant-abx", action="store_true", help="Flag: Receiving concurrent non-CDI systemic antibiotics")
     parser.add_argument("--immunocompromised", action="store_true", help="Flag: Immunocompromised patient")
     parser.add_argument("--ppi", action="store_true", help="Flag: Ongoing Proton Pump Inhibitor usage")
     parser.add_argument("--albumin", type=float, default=None, help="Serum albumin (g/dL)")
     parser.add_argument("--ckd", action="store_true", help="Flag: Chronic kidney disease stage >= 3")
-    parser.add_argument("--inpatient", action="store_true", default=True, help="Flag: Hospital inpatient or nursing home resident")
+    parser.add_argument(
+        "--inpatient",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Hospital inpatient or nursing-home resident (default: false; use --no-inpatient to clear explicitly)",
+    )
     parser.add_argument("--hypotension", action="store_true", help="Flag: Hypotension / vasopressor shock")
     parser.add_argument("--ileus", action="store_true", help="Flag: Paralytic ileus present")
     parser.add_argument("--megacolon", action="store_true", help="Flag: Toxic megacolon present")
-    parser.add_argument("--lactate", type=float, default=None, help="Serum lactate level (mmol/L)")
+    parser.add_argument("--lactate", type=float, default=None, help="Serum lactate level (mmol/L; contextual marker, not an IDSA/SHEA fulminant criterion)")
     parser.add_argument("--chf", action="store_true", help="Flag: History of congestive heart failure")
     parser.add_argument("--prior-regimen", type=str, default=None, choices=["vancomycin", "fidaxomicin", "metronidazole"], help="Prior antibiotic used for previous episode")
 
@@ -316,7 +325,10 @@ def main():
             prior_treatment_regimen=args.prior_regimen
         )
 
-    report = CDiffRecurrenceEngine.evaluate(patient)
+    try:
+        report = CDiffRecurrenceEngine.evaluate(patient)
+    except ValueError as exc:
+        parser.error(str(exc))
 
     if args.json:
         print(report.to_json())

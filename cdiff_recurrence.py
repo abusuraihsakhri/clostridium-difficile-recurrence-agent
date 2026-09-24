@@ -2,22 +2,21 @@
 """
 Clostridioides (Clostridium) difficile Recurrence & Clinical Severity Engine
 ----------------------------------------------------------------------------
-Implements evidence-based clinical decision support based on IDSA/SHEA 2021
-and ACG guidelines, multivariable recurrence risk stratification (Hu et al.,
-Garey et al.), Bezlotoxumab criteria, and Fecal Microbiota Transplantation
-(FMT) / Live Biotherapeutic Product (VOWST, REBYOTA) candidacy triage.
+Implements adult CDI severity rules based on IDSA/SHEA guidance, a
+repository-specific recurrence-risk heuristic, guideline-referenced treatment
+option summaries, bezlotoxumab consideration, and fecal microbiota-based
+therapy candidacy triage.
 
 Domain: Infectious Diseases / Gastroenterology
 Pure Python Standard Library (no external dependencies required).
 """
 
 from dataclasses import dataclass, field, asdict
-from typing import Dict, Any, List, Optional, Tuple, Union
+from typing import Dict, Any, List, Optional
 import math
 import json
 import csv
 import io
-import sys
 
 
 @dataclass
@@ -34,13 +33,43 @@ class PatientInput:
     ppi_use: bool = False  # proton pump inhibitors / acid suppression
     serum_albumin: Optional[float] = None  # g/dL
     chronic_kidney_disease: bool = False  # CKD Stage >= 3 or eGFR < 60 mL/min
-    inpatient_or_nursing_home: bool = True  # healthcare exposure / LTCF
+    inpatient_or_nursing_home: bool = False  # healthcare exposure / LTCF
     hypotension_or_shock: bool = False  # SBP < 90 mmHg or vasopressor requirement
     ileus_present: bool = False  # clinical/radiologic ileus
     toxic_megacolon: bool = False  # colonic dilation > 6 cm with toxicity
-    serum_lactate: Optional[float] = None  # mmol/L (lactate >= 5.0 indicates fulminant)
-    history_congestive_heart_failure: bool = False  # for Bezlotoxumab black-box warning
+    serum_lactate: Optional[float] = None  # mmol/L; contextual severity marker
+    history_congestive_heart_failure: bool = False  # for bezlotoxumab heart-failure precaution
     prior_treatment_regimen: Optional[str] = None  # 'vancomycin', 'fidaxomicin', 'metronidazole', None
+
+    def __post_init__(self) -> None:
+        """Validate inputs for the adult guideline scope used by this tool."""
+        if not str(self.patient_id).strip():
+            raise ValueError("patient_id must not be empty")
+        if not 18 <= self.age <= 130:
+            raise ValueError("age must be between 18 and 130 years; this tool implements adult guidance")
+        if self.wbc_count < 0:
+            raise ValueError("wbc_count must be non-negative")
+        if self.serum_creatinine < 0:
+            raise ValueError("serum_creatinine must be non-negative")
+        if self.baseline_creatinine is not None and self.baseline_creatinine <= 0:
+            raise ValueError("baseline_creatinine must be > 0 when supplied")
+        if self.prior_cdi_episodes < 0:
+            raise ValueError("prior_cdi_episodes must be non-negative")
+        if self.serum_albumin is not None and self.serum_albumin <= 0:
+            raise ValueError("serum_albumin must be > 0 when supplied")
+        if self.serum_lactate is not None and self.serum_lactate < 0:
+            raise ValueError("serum_lactate must be non-negative")
+        if self.prior_treatment_regimen is not None:
+            normalized = self.prior_treatment_regimen.strip().lower()
+            if normalized in {"", "none"}:
+                self.prior_treatment_regimen = None
+            else:
+                allowed = {"vancomycin", "fidaxomicin", "metronidazole"}
+                if normalized not in allowed:
+                    raise ValueError(
+                        "prior_treatment_regimen must be one of: vancomycin, fidaxomicin, metronidazole, none"
+                    )
+                self.prior_treatment_regimen = normalized
 
 
 @dataclass
@@ -57,12 +86,16 @@ class SeverityAssessment:
 
 @dataclass
 class RecurrenceRiskAssessment:
-    """Multivariable risk score and statistical probability of recurrence."""
+    """Repository-specific recurrence-risk heuristic and legacy numeric estimate."""
     risk_score: float
     risk_category: str  # 'LOW', 'MODERATE', 'HIGH', 'VERY_HIGH'
-    predicted_recurrence_probability: float  # 0.0 to 1.0 (percentage)
+    predicted_recurrence_probability: float  # legacy heuristic estimate from 0.0 to 1.0
     contributing_risk_factors: List[Dict[str, Any]] = field(default_factory=list)
     recurrent_episode_type: str = "PRIMARY"  # 'PRIMARY', 'FIRST_RECURRENCE', 'MULTIPLE_RECURRENCE'
+    model_notice: str = (
+        "Heuristic educational estimate retained for backwards compatibility; "
+        "it is not a validated or calibrated clinical prediction model."
+    )
 
 
 @dataclass
@@ -104,16 +137,18 @@ class AssessmentReport:
 class CDiffRecurrenceEngine:
     """
     Core algorithmic engine for C. difficile severity classification,
-    recurrence risk calculation, and guideline-adherent therapeutic mapping.
+    recurrence-risk heuristic calculation, and guideline-referenced therapeutic mapping.
     """
 
     @staticmethod
     def assess_severity(patient: PatientInput) -> SeverityAssessment:
         """
         Classify disease severity according to SHEA/IDSA & ACG guidelines.
-        - Non-Severe: WBC <= 15.0 x 10^3/uL AND Serum Cr <= 1.5 mg/dL (or < 1.5x baseline)
-        - Severe: WBC > 15.0 x 10^3/uL OR Serum Cr >= 1.5 mg/dL (or >= 1.5x baseline)
-        - Fulminant (Severe-Complicated): Hypotension, shock, ileus, toxic megacolon, or lactate >= 5.0 mmol/L
+        - Non-Severe: WBC <= 15.0 x 10^3/uL AND Serum Cr < 1.5 mg/dL
+        - Severe: WBC > 15.0 x 10^3/uL OR Serum Cr >= 1.5 mg/dL
+        - Fulminant: Hypotension/shock, ileus, or toxic megacolon
+        Baseline creatinine and lactate may be clinically relevant, but they are not used here
+        as IDSA/SHEA fulminant classification criteria.
         """
         fulminant_triggers = []
         if patient.hypotension_or_shock:
@@ -121,20 +156,12 @@ class CDiffRecurrenceEngine:
         if patient.ileus_present:
             fulminant_triggers.append("Paralytic ileus documented clinically or radiographically")
         if patient.toxic_megacolon:
-            fulminant_triggers.append("Toxic megacolon (colonic distension > 6.0 cm)")
-        if patient.serum_lactate is not None and patient.serum_lactate >= 5.0:
-            fulminant_triggers.append(f"Severe lactic acidosis (Lactate {patient.serum_lactate:.1f} >= 5.0 mmol/L)")
+            fulminant_triggers.append("Toxic megacolon")
 
-        # WBC threshold: > 15,000 / uL (or >= 15.0 in 10^3/uL units)
-        wbc_flag = patient.wbc_count >= 15.0
-
-        # Creatinine threshold: >= 1.5 mg/dL or >= 1.5x baseline
-        cr_flag = False
-        if patient.baseline_creatinine and patient.baseline_creatinine > 0:
-            if patient.serum_creatinine >= 1.5 * patient.baseline_creatinine:
-                cr_flag = True
-        elif patient.serum_creatinine >= 1.5:
-            cr_flag = True
+        # IDSA/SHEA supportive severity thresholds for adults:
+        # non-severe is WBC <= 15,000/uL and serum creatinine < 1.5 mg/dL.
+        wbc_flag = patient.wbc_count > 15.0
+        cr_flag = patient.serum_creatinine >= 1.5
 
         if len(fulminant_triggers) > 0:
             grade = "FULMINANT"
@@ -147,7 +174,7 @@ class CDiffRecurrenceEngine:
             is_ful = False
             reasons = []
             if wbc_flag:
-                reasons.append(f"Leukocytosis (WBC {patient.wbc_count:.1f} >= 15.0 x 10^3/uL)")
+                reasons.append(f"Leukocytosis (WBC {patient.wbc_count:.1f} > 15.0 x 10^3/uL)")
             if cr_flag:
                 reasons.append(f"Renal impairment (Serum Cr {patient.serum_creatinine:.2f} mg/dL)")
             summary = f"Severe C. difficile infection: {', '.join(reasons)}."
@@ -155,7 +182,13 @@ class CDiffRecurrenceEngine:
             grade = "NON_SEVERE"
             is_sev = False
             is_ful = False
-            summary = "Non-severe C. difficile infection: WBC < 15.0 x 10^3/uL and Serum Creatinine < 1.5 mg/dL."
+            summary = "Non-severe C. difficile infection: WBC <= 15.0 x 10^3/uL and Serum Creatinine < 1.5 mg/dL."
+
+        if patient.serum_lactate is not None and patient.serum_lactate >= 5.0:
+            summary += (
+                " Lactate >= 5.0 mmol/L is a concerning severity marker, "
+                "but it is not an IDSA/SHEA fulminant criterion."
+            )
 
         return SeverityAssessment(
             severity_grade=grade,
@@ -170,8 +203,9 @@ class CDiffRecurrenceEngine:
     @staticmethod
     def calculate_recurrence_risk(patient: PatientInput, severity: SeverityAssessment) -> RecurrenceRiskAssessment:
         """
-        Multivariable clinical risk stratification for recurrent C. difficile infection (rCDI).
-        Calculates weighted risk points and statistical recurrence probability via logistic transform:
+        Repository-specific heuristic risk stratification for recurrent C. difficile infection (rCDI).
+        The legacy numeric estimate is retained for backwards compatibility and must not be
+        interpreted as a validated patient-specific probability. It uses the transform:
         z = -2.20 + 0.35 * RiskScore
         P = 1 / (1 + exp(-z))
         """
@@ -185,7 +219,7 @@ class CDiffRecurrenceEngine:
             factors.append({
                 "factor": "Age >= 65 years",
                 "points": pts,
-                "detail": f"Age {patient.age} is associated with altered microbiota and immunosenescence (OR ~ 2.1)"
+                "detail": f"Age {patient.age} is a guideline-recognized recurrence risk factor"
             })
 
         # 2. Prior CDI episodes
@@ -196,7 +230,7 @@ class CDiffRecurrenceEngine:
             factors.append({
                 "factor": "Prior CDI Episode (1st Recurrence)",
                 "points": pts,
-                "detail": "Single previous recurrence increases subsequent recurrence risk to ~35-45%"
+                "detail": "A prior CDI episode increases the risk of an additional recurrence"
             })
         elif patient.prior_cdi_episodes >= 2:
             pts = 4.0
@@ -205,7 +239,7 @@ class CDiffRecurrenceEngine:
             factors.append({
                 "factor": f"Multiple Prior CDI Episodes ({patient.prior_cdi_episodes} prior)",
                 "points": pts,
-                "detail": "Multiple recurrences demonstrate persistent dysbiosis with recurrence risk exceeding 50-65%"
+                "detail": "Multiple prior episodes are associated with a high risk of additional recurrence"
             })
         else:
             ep_type = "PRIMARY"
@@ -217,7 +251,7 @@ class CDiffRecurrenceEngine:
             factors.append({
                 "factor": "Concomitant Systemic Antibiotic Therapy",
                 "points": pts,
-                "detail": "Ongoing broad-spectrum antimicrobials suppress commensal colonization resistance (OR ~ 2.5-3.0)"
+                "detail": "Ongoing non-CDI antimicrobials can disrupt colonization resistance"
             })
 
         # 4. Severe index episode
@@ -281,7 +315,7 @@ class CDiffRecurrenceEngine:
             })
 
         # Calculate logistic probability
-        # Calibrated logistic model: intercept = -2.20, slope = 0.35
+        # Legacy heuristic mapping: these coefficients are not externally validated/calibrated.
         # Baseline probability for score 0 = 1 / (1 + exp(2.20)) = 0.099 (~10%)
         # Score 3: z = -1.15 -> P = 24.0%
         # Score 6: z = -0.10 -> P = 47.5%
@@ -314,14 +348,14 @@ class CDiffRecurrenceEngine:
         risk: RecurrenceRiskAssessment
     ) -> TreatmentGuidelineRecommendation:
         """
-        Generate IDSA/SHEA 2021 & ACG compliant therapeutic plans,
-        Bezlotoxumab evaluation, and FMT / Live Biotherapeutic candidacy.
+        Generate guideline-referenced therapeutic option summaries,
+        bezlotoxumab consideration, and fecal microbiota-based therapy candidacy.
         """
         # 1. Primary & Alternative Regimens based on episode stage and severity
         if severity.is_fulminant:
             primary_reg = "Oral Vancomycin PLUS Intravenous Metronidazole"
             primary_dose = "Vancomycin 500 mg orally/nasogastrically Q6H (QID) + Metronidazole 500 mg IV Q8H (TID)"
-            primary_dur = "14 days (or until clinical resolution; re-evaluate daily)"
+            primary_dur = "Duration should follow current guideline/local protocol and clinical response"
             
             alt_reg = "Vancomycin Oral + IV Metronidazole + Vancomycin Retention Enema"
             alt_dose = "If ileus present: Add Vancomycin 500 mg in 100 mL normal saline PR every 6 hours via rectal catheter"
@@ -338,35 +372,28 @@ class CDiffRecurrenceEngine:
             alt_dur = "10 days"
 
         elif risk.recurrent_episode_type == "FIRST_RECURRENCE":
-            prior_reg = (patient.prior_treatment_regimen or "").lower()
-            if "fidaxomicin" in prior_reg:
-                # Used fidaxomicin initially, switch to pulsed/tapered vancomycin or extended fidaxomicin
-                primary_reg = "Vancomycin Tapered and Pulsed Regimen"
-                primary_dose = "125 mg QID x 10-14d, then BID x 7d, then QD x 7d, then 125 mg every 2-3 days"
-                primary_dur = "6 to 8 weeks total"
+            # IDSA/SHEA 2021 prefers fidaxomicin (standard or extended-pulsed)
+            # over a standard course of vancomycin for recurrent CDI.
+            primary_reg = "Fidaxomicin Standard or Extended-Pulsed (Preferred)"
+            primary_dose = "200 mg orally BID x 10 days OR 200 mg BID x 5 days then every other day x 20 days"
+            primary_dur = "10 days (standard) or 25 days (extended-pulsed)"
 
-                alt_reg = "Fidaxomicin Extended-Pulsed Regimen"
-                alt_dose = "200 mg BID x 5 days, then 200 mg once every other day"
-                alt_dur = "Days 6 through 25 (20 days pulsed)"
-            else:
-                # Used vancomycin or metronidazole initially: prefer Fidaxomicin standard or extended
-                primary_reg = "Fidaxomicin Standard or Extended-Pulsed (Preferred)"
-                primary_dose = "200 mg orally BID x 10 days OR 200 mg BID x 5d then QOD x 20d"
-                primary_dur = "10 days (Standard) or 25 days (Extended-Pulsed)"
-
-                alt_reg = "Vancomycin Tapered and Pulsed Regimen"
-                alt_dose = "125 mg QID x 10-14d, then BID x 7d, then QD x 7d, then 125 mg every 2-3 days"
-                alt_dur = "6 to 8 weeks total"
+            alt_reg = "Vancomycin Tapered and Pulsed Regimen"
+            alt_dose = "Use a guideline-consistent tapered/pulsed oral vancomycin regimen"
+            alt_dur = "Regimen-specific; follow current guideline and local protocol"
 
         else:
             # MULTIPLE RECURRENCES (>= 2 prior episodes)
-            primary_reg = "Fecal Microbiota Transplantation (FMT) / FDA Live Biotherapeutic post-antibiotic lead-in"
-            primary_dose = "Complete oral Vancomycin (125 mg QID x 10-14d) or Fidaxomicin, followed by FMT / Biotherapeutic"
-            primary_dur = "Antibiotic lead-in x 10-14d, then FMT / VOWST / REBYOTA"
+            primary_reg = "Multiple-recurrence options: antibacterial therapy plus microbiota-restoration evaluation"
+            primary_dose = (
+                "Use a guideline-supported recurrent-CDI antibacterial regimen; after completion, "
+                "evaluate for FDA-approved fecal microbiota products or conventional FMT as appropriate"
+            )
+            primary_dur = "Regimen-specific; follow current guideline, product labeling, and specialist protocol"
 
-            alt_reg = "Vancomycin Taper/Pulse Regimen followed by Rifaximin Chaser"
-            alt_dose = "Vancomycin taper/pulse x 6-8 weeks, followed by Rifaximin 400 mg TID x 20 days"
-            alt_dur = "9 to 11 weeks total"
+            alt_reg = "Vancomycin tapered/pulsed regimen or vancomycin followed by rifaximin"
+            alt_dose = "Use a guideline-consistent regimen selected for the individual clinical context"
+            alt_dur = "Regimen-specific"
 
         # 2. Bezlotoxumab (ZINPLAVA) monoclonal antibody assessment
         # IDSA/SHEA 2021: Consider Bezlotoxumab (10 mg/kg IV single dose) for patients with CDI episode in the last 6 months
@@ -387,10 +414,17 @@ class CDiffRecurrenceEngine:
                 reasons.append("Severe CDI presentation")
             if patient.prior_cdi_episodes >= 1:
                 reasons.append("History of recurrent CDI")
-            bezlo_rationale = f"Indicated as adjunctive single-dose infusion (10 mg/kg IV) during standard antibiotic therapy to bind Toxin B. Risk factors: {', '.join(reasons)}."
+            bezlo_rationale = (
+                "Consider adjunctive bezlotoxumab (10 mg/kg IV once during antibacterial treatment) "
+                f"in a patient at high risk for recurrence. Risk factors present: {', '.join(reasons)}. "
+                "This flag is decision support, not an automatic treatment recommendation."
+            )
             
             if patient.history_congestive_heart_failure:
-                bezlo_warning = "FDA BLACK BOX WARNING: Heart failure exacerbation observed in clinical trials. Use Bezlotoxumab only if benefit strictly outweighs risk in patients with congestive heart failure."
+                bezlo_warning = (
+                    "FDA WARNING/PRECAUTION: heart failure occurred more often in patients with prior CHF; "
+                    "reserve bezlotoxumab for use when the benefit outweighs the risk."
+                )
 
         # 3. FMT and Live Biotherapeutic Product (LBP) Assessment
         # Indicated for >= 2 recurrences (i.e. >= 3 total episodes) treated with appropriate antibiotics
@@ -400,11 +434,20 @@ class CDiffRecurrenceEngine:
 
         if patient.prior_cdi_episodes >= 2:
             fmt_candidacy = True
-            fmt_rationale = f"Strong recommendation (IDSA/SHEA & ACG): Patient has {patient.prior_cdi_episodes} prior recurrences. FMT / LBP restores microbial diversity and cures >85-90% of multiply recurrent CDI."
+            fmt_rationale = (
+                f"Patient has {patient.prior_cdi_episodes} prior recurrences and may be evaluated for "
+                "fecal microbiota-based therapy after standard-of-care antibacterial treatment. "
+                "Selection depends on immune status, product eligibility, availability, and specialist assessment."
+            )
+            if patient.immunocompromised:
+                fmt_rationale += (
+                    " AGA 2024 guidance distinguishes mild/moderate from severe immunocompromise; "
+                    "this binary input cannot make that distinction, so specialist review is required."
+                )
             lbp_options = [
-                "VOWST (SER-109): FDA-approved oral microbiota spores (4 capsules once daily x 3 consecutive days after completing antibiotics & magnesium citrate)",
-                "REBYOTA (RBX2660): FDA-approved rectally administered live microbiota suspension (single 150 mL dose after antibiotic completion)",
-                "Donor Fecal Microbiota Transplantation (Colonoscopy or retention enema via authorized stool bank)"
+                "VOWST (fecal microbiota spores, live-brpk): FDA-approved to prevent recurrence after antibacterial treatment for recurrent CDI; follow current labeling",
+                "REBYOTA (fecal microbiota, live-jslm): FDA-approved to prevent recurrence after antibiotic treatment for recurrent CDI; follow current labeling",
+                "Conventional donor FMT: use only within applicable regulatory, donor-screening, and institutional requirements"
             ]
         elif patient.prior_cdi_episodes == 1 and risk.risk_category in ["HIGH", "VERY_HIGH"]:
             fmt_candidacy = False
@@ -412,9 +455,9 @@ class CDiffRecurrenceEngine:
 
         # 4. Supportive Care Measures
         supportive = [
-            "Discontinue non-essential systemic antimicrobial therapy immediately (reduces recurrence risk by 50%).",
+            "Review and discontinue non-essential systemic antimicrobial therapy when clinically appropriate.",
             "Re-evaluate and discontinue unnecessary Proton Pump Inhibitors (PPIs) / H2 receptor antagonists.",
-            "Avoid anti-motility / anti-diarrheal medications (e.g. loperamide, diphenoxylate) due to risk of toxic megacolon precipitation.",
+            "Avoid routine anti-motility therapy during active severe disease unless the treating clinician determines it is appropriate.",
             "Ensure adequate fluid resuscitation and electrolyte replacement (monitor potassium and magnesium)."
         ]
 
@@ -460,31 +503,61 @@ class CDiffRecurrenceEngine:
             treatment=rx
         )
 
+    @staticmethod
+    def _parse_csv_bool(value: Optional[str], field_name: str, default: bool = False) -> bool:
+        """Parse common CSV boolean forms without silently accepting invalid values."""
+        if value is None or str(value).strip() == "":
+            return default
+        normalized = str(value).strip().lower()
+        if normalized in {"true", "1", "yes", "y"}:
+            return True
+        if normalized in {"false", "0", "no", "n"}:
+            return False
+        raise ValueError(
+            f"Invalid boolean value for {field_name!r}: {value!r}; "
+            "use true/false, yes/no, or 1/0"
+        )
+
     @classmethod
     def evaluate_batch_csv(cls, csv_text: str) -> List[AssessmentReport]:
-        """Parse CSV content and run batch evaluations."""
+        """Parse a CSV cohort and run validated adult CDI assessments."""
         reader = csv.DictReader(io.StringIO(csv_text))
-        results = []
-        for row in reader:
-            p = PatientInput(
-                patient_id=row.get("patient_id", f"PT-{len(results)+1}"),
-                age=int(row.get("age", 65)),
-                wbc_count=float(row.get("wbc_count", 10.0)),
-                serum_creatinine=float(row.get("serum_creatinine", 1.0)),
-                baseline_creatinine=float(row["baseline_creatinine"]) if row.get("baseline_creatinine") else None,
-                prior_cdi_episodes=int(row.get("prior_cdi_episodes", 0)),
-                concomitant_antibiotics=str(row.get("concomitant_antibiotics", "false")).lower() in ["true", "1", "yes"],
-                immunocompromised=str(row.get("immunocompromised", "false")).lower() in ["true", "1", "yes"],
-                ppi_use=str(row.get("ppi_use", "false")).lower() in ["true", "1", "yes"],
-                serum_albumin=float(row["serum_albumin"]) if row.get("serum_albumin") else None,
-                chronic_kidney_disease=str(row.get("chronic_kidney_disease", "false")).lower() in ["true", "1", "yes"],
-                inpatient_or_nursing_home=str(row.get("inpatient_or_nursing_home", "true")).lower() in ["true", "1", "yes"],
-                hypotension_or_shock=str(row.get("hypotension_or_shock", "false")).lower() in ["true", "1", "yes"],
-                ileus_present=str(row.get("ileus_present", "false")).lower() in ["true", "1", "yes"],
-                toxic_megacolon=str(row.get("toxic_megacolon", "false")).lower() in ["true", "1", "yes"],
-                serum_lactate=float(row["serum_lactate"]) if row.get("serum_lactate") else None,
-                history_congestive_heart_failure=str(row.get("history_congestive_heart_failure", "false")).lower() in ["true", "1", "yes"],
-                prior_treatment_regimen=row.get("prior_treatment_regimen") or None
-            )
-            results.append(cls.evaluate(p))
+        if reader.fieldnames is None:
+            raise ValueError("CSV input is missing a header row")
+
+        required = {"patient_id", "age", "wbc_count", "serum_creatinine"}
+        missing = sorted(required.difference(reader.fieldnames))
+        if missing:
+            raise ValueError(f"CSV input is missing required columns: {', '.join(missing)}")
+
+        results: List[AssessmentReport] = []
+        for line_number, row in enumerate(reader, start=2):
+            try:
+                patient = PatientInput(
+                    patient_id=(row.get("patient_id") or "").strip(),
+                    age=int(row["age"]),
+                    wbc_count=float(row["wbc_count"]),
+                    serum_creatinine=float(row["serum_creatinine"]),
+                    baseline_creatinine=float(row["baseline_creatinine"]) if row.get("baseline_creatinine") else None,
+                    prior_cdi_episodes=int(row.get("prior_cdi_episodes") or 0),
+                    concomitant_antibiotics=cls._parse_csv_bool(row.get("concomitant_antibiotics"), "concomitant_antibiotics"),
+                    immunocompromised=cls._parse_csv_bool(row.get("immunocompromised"), "immunocompromised"),
+                    ppi_use=cls._parse_csv_bool(row.get("ppi_use"), "ppi_use"),
+                    serum_albumin=float(row["serum_albumin"]) if row.get("serum_albumin") else None,
+                    chronic_kidney_disease=cls._parse_csv_bool(row.get("chronic_kidney_disease"), "chronic_kidney_disease"),
+                    inpatient_or_nursing_home=cls._parse_csv_bool(row.get("inpatient_or_nursing_home"), "inpatient_or_nursing_home"),
+                    hypotension_or_shock=cls._parse_csv_bool(row.get("hypotension_or_shock"), "hypotension_or_shock"),
+                    ileus_present=cls._parse_csv_bool(row.get("ileus_present"), "ileus_present"),
+                    toxic_megacolon=cls._parse_csv_bool(row.get("toxic_megacolon"), "toxic_megacolon"),
+                    serum_lactate=float(row["serum_lactate"]) if row.get("serum_lactate") else None,
+                    history_congestive_heart_failure=cls._parse_csv_bool(
+                        row.get("history_congestive_heart_failure"),
+                        "history_congestive_heart_failure",
+                    ),
+                    prior_treatment_regimen=(row.get("prior_treatment_regimen") or "").strip() or None,
+                )
+                results.append(cls.evaluate(patient))
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"Invalid CSV data on line {line_number}: {exc}") from exc
+
         return results

@@ -1,27 +1,38 @@
 [build-system]
-requires = ["setuptools>=61.0"]
+requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "clostridium-difficile-recurrence-engine"
-version = "2.0.0"
-description = "CDiff-Sentinel: SHEA/IDSA Staging, Fidaxomicin Triage & FMT Candidate Engine"
+version = "2.1.0"
+description = "Deterministic adult CDI severity classification, recurrence-risk heuristics, and guideline-referenced treatment option summaries."
 readme = "README.md"
-authors = [{ name = "Dr. Abu Suraih Sakhri", email = "abusuraih@example.com" }]
-license = { text = "MIT" }
+authors = [{ name = "Abu Suraih Sakhri" }]
+license = "MIT"
+requires-python = ">=3.10"
+dependencies = []
 classifiers = [
     "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3 :: Only",
     "Operating System :: OS Independent",
     "Topic :: Scientific/Engineering :: Medical Science Apps.",
-    "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
-requires-python = ">=3.9"
-dependencies = []
+
+[project.optional-dependencies]
+test = [
+    "pytest>=8,<9",
+    "build>=1.2,<2",
+]
 
 [project.scripts]
 clostridium-difficile-recurrence-engine = "clostridium_difficile_recurrence_agent.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/abusuraihsakhri/clostridium-difficile-recurrence-engine"
-Repository = "https://github.com/abusuraihsakhri/clostridium-difficile-recurrence-engine.git"
+Homepage = "https://github.com/abusuraihsakhri/clostridium-difficile-recurrence-agent"
+Repository = "https://github.com/abusuraihsakhri/clostridium-difficile-recurrence-agent.git"
+
+[tool.setuptools]
+py-modules = ["cdiff_recurrence", "cli"]
+
+[tool.setuptools.packages.find]
+include = ["clostridium_difficile_recurrence_agent*"]
