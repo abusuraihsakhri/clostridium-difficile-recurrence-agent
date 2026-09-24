@@ -7,7 +7,6 @@ guideline mapping, Bezlotoxumab rules, FMT candidacy, and CSV batch processing.
 
 import unittest
 import json
-import math
 from cdiff_recurrence import (
     CDiffRecurrenceEngine,
     PatientInput,
@@ -38,8 +37,7 @@ class TestCDiffSeverityAssessment(unittest.TestCase):
         self.assertFalse(sev.wbc_threshold_exceeded)
         self.assertFalse(sev.creatinine_threshold_exceeded)
 
-    def test_severe_by_wbc_cutoff(self):
-        # WBC exactly 15.0 or above
+    def test_wbc_15_is_non_severe_when_creatinine_is_normal(self):
         patient = PatientInput(
             patient_id="PT-02",
             age=55,
@@ -47,10 +45,10 @@ class TestCDiffSeverityAssessment(unittest.TestCase):
             serum_creatinine=1.1
         )
         sev = CDiffRecurrenceEngine.assess_severity(patient)
-        self.assertEqual(sev.severity_grade, "SEVERE")
-        self.assertTrue(sev.is_severe)
+        self.assertEqual(sev.severity_grade, "NON_SEVERE")
+        self.assertFalse(sev.is_severe)
         self.assertFalse(sev.is_fulminant)
-        self.assertTrue(sev.wbc_threshold_exceeded)
+        self.assertFalse(sev.wbc_threshold_exceeded)
         self.assertFalse(sev.creatinine_threshold_exceeded)
 
     def test_severe_by_high_wbc(self):
@@ -76,8 +74,7 @@ class TestCDiffSeverityAssessment(unittest.TestCase):
         self.assertTrue(sev.is_severe)
         self.assertTrue(sev.creatinine_threshold_exceeded)
 
-    def test_severe_by_baseline_creatinine_multiplier(self):
-        # Baseline 0.8 -> 1.3 is > 1.5x baseline (0.8 * 1.5 = 1.2)
+    def test_baseline_creatinine_multiplier_does_not_override_absolute_idsa_threshold(self):
         patient = PatientInput(
             patient_id="PT-05",
             age=45,
@@ -86,8 +83,8 @@ class TestCDiffSeverityAssessment(unittest.TestCase):
             baseline_creatinine=0.8
         )
         sev = CDiffRecurrenceEngine.assess_severity(patient)
-        self.assertEqual(sev.severity_grade, "SEVERE")
-        self.assertTrue(sev.creatinine_threshold_exceeded)
+        self.assertEqual(sev.severity_grade, "NON_SEVERE")
+        self.assertFalse(sev.creatinine_threshold_exceeded)
 
     def test_fulminant_by_shock(self):
         patient = PatientInput(
@@ -128,7 +125,7 @@ class TestCDiffSeverityAssessment(unittest.TestCase):
         self.assertEqual(sev.severity_grade, "FULMINANT")
         self.assertTrue(sev.is_fulminant)
 
-    def test_fulminant_by_lactate(self):
+    def test_high_lactate_is_contextual_not_fulminant_by_itself(self):
         patient = PatientInput(
             patient_id="PT-09",
             age=75,
@@ -137,8 +134,9 @@ class TestCDiffSeverityAssessment(unittest.TestCase):
             serum_lactate=5.4
         )
         sev = CDiffRecurrenceEngine.assess_severity(patient)
-        self.assertEqual(sev.severity_grade, "FULMINANT")
-        self.assertTrue(sev.is_fulminant)
+        self.assertEqual(sev.severity_grade, "SEVERE")
+        self.assertFalse(sev.is_fulminant)
+        self.assertIn("not an IDSA/SHEA fulminant criterion", sev.clinical_summary)
 
 
 class TestCDiffRecurrenceRiskModel(unittest.TestCase):
@@ -292,7 +290,8 @@ class TestCDiffTreatmentRecommendations(unittest.TestCase):
         report = CDiffRecurrenceEngine.evaluate(patient)
         tx = report.treatment
 
-        self.assertIn("Vancomycin Tapered and Pulsed Regimen", tx.primary_regimen)
+        self.assertIn("Fidaxomicin", tx.primary_regimen)
+        self.assertIn("Vancomycin Tapered and Pulsed Regimen", tx.alternative_regimen)
 
     def test_multiple_recurrence_fmt_candidacy(self):
         patient = PatientInput(
@@ -306,7 +305,7 @@ class TestCDiffTreatmentRecommendations(unittest.TestCase):
         tx = report.treatment
 
         self.assertTrue(tx.fmt_candidacy)
-        self.assertIn("FMT / LBP restores microbial diversity", tx.fmt_rationale)
+        self.assertIn("may be evaluated for fecal microbiota-based therapy", tx.fmt_rationale)
         self.assertTrue(len(tx.live_biotherapeutic_options) >= 2)
         self.assertTrue(any("VOWST" in opt for opt in tx.live_biotherapeutic_options))
         self.assertTrue(any("REBYOTA" in opt for opt in tx.live_biotherapeutic_options))
@@ -327,7 +326,7 @@ class TestCDiffTreatmentRecommendations(unittest.TestCase):
         self.assertIn("Age >= 65", tx.bezlotoxumab_rationale)
         self.assertIsNone(tx.bezlotoxumab_warning)
 
-    def test_bezlotoxumab_heart_failure_black_box_warning(self):
+    def test_bezlotoxumab_heart_failure_warning_precaution(self):
         patient = PatientInput(
             patient_id="PT-BEZLO-2",
             age=74,
@@ -341,7 +340,8 @@ class TestCDiffTreatmentRecommendations(unittest.TestCase):
 
         self.assertTrue(tx.bezlotoxumab_indicated)
         self.assertIsNotNone(tx.bezlotoxumab_warning)
-        self.assertIn("BLACK BOX WARNING", tx.bezlotoxumab_warning)
+        self.assertIn("FDA WARNING/PRECAUTION", tx.bezlotoxumab_warning)
+        self.assertIn("benefit outweighs the risk", tx.bezlotoxumab_warning)
 
 
 class TestCDiffSerializationAndBatch(unittest.TestCase):
@@ -365,6 +365,7 @@ class TestCDiffSerializationAndBatch(unittest.TestCase):
         parsed = json.loads(json_str)
         self.assertEqual(parsed["patient_id"], "PT-SER-01")
         self.assertEqual(parsed["severity"]["severity_grade"], "NON_SEVERE")
+        self.assertIn("not a validated or calibrated", parsed["recurrence_risk"]["model_notice"])
 
     def test_batch_csv_evaluation(self):
         csv_sample = (
@@ -382,10 +383,10 @@ class TestCDiffSerializationAndBatch(unittest.TestCase):
         self.assertEqual(reports[2].patient_id, "P-103")
         self.assertTrue(reports[2].treatment.fmt_candidacy)
 
-    def test_edge_case_zero_and_none_values(self):
+    def test_low_measurement_values_are_supported_for_adults(self):
         patient = PatientInput(
             patient_id="PT-ZERO",
-            age=0,
+            age=18,
             wbc_count=0.0,
             serum_creatinine=0.0,
             baseline_creatinine=None,
@@ -397,6 +398,22 @@ class TestCDiffSerializationAndBatch(unittest.TestCase):
         report = CDiffRecurrenceEngine.evaluate(patient)
         self.assertEqual(report.severity.severity_grade, "NON_SEVERE")
         self.assertEqual(report.recurrence_risk.risk_score, 0.0)
+
+    def test_rejects_pediatric_age_for_adult_guideline_scope(self):
+        with self.assertRaisesRegex(ValueError, "adult guidance"):
+            PatientInput(patient_id="PT-PEDS", age=17)
+
+    def test_batch_rejects_invalid_boolean(self):
+        csv_sample = (
+            "patient_id,age,wbc_count,serum_creatinine,inpatient_or_nursing_home\n"
+            "P-201,45,8.2,0.9,maybe\n"
+        )
+        with self.assertRaisesRegex(ValueError, "Invalid boolean value"):
+            CDiffRecurrenceEngine.evaluate_batch_csv(csv_sample)
+
+    def test_batch_requires_core_columns(self):
+        with self.assertRaisesRegex(ValueError, "missing required columns"):
+            CDiffRecurrenceEngine.evaluate_batch_csv("patient_id,age\nP-1,45\n")
 
     def test_hypoalbuminemia_and_ckd_factors(self):
         patient = PatientInput(
