@@ -61,12 +61,15 @@ class PatientInput:
             raise ValueError("serum_lactate must be non-negative")
         if self.prior_treatment_regimen is not None:
             normalized = self.prior_treatment_regimen.strip().lower()
-            allowed = {"vancomycin", "fidaxomicin", "metronidazole"}
-            if normalized not in allowed:
-                raise ValueError(
-                    "prior_treatment_regimen must be one of: vancomycin, fidaxomicin, metronidazole"
-                )
-            self.prior_treatment_regimen = normalized
+            if normalized in {"", "none"}:
+                self.prior_treatment_regimen = None
+            else:
+                allowed = {"vancomycin", "fidaxomicin", "metronidazole"}
+                if normalized not in allowed:
+                    raise ValueError(
+                        "prior_treatment_regimen must be one of: vancomycin, fidaxomicin, metronidazole, none"
+                    )
+                self.prior_treatment_regimen = normalized
 
 
 @dataclass
