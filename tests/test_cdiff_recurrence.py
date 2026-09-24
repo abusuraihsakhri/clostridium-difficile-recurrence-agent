@@ -403,6 +403,10 @@ class TestCDiffSerializationAndBatch(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "adult guidance"):
             PatientInput(patient_id="PT-PEDS", age=17)
 
+    def test_prior_regimen_none_sentinel_normalizes_to_none(self):
+        patient = PatientInput(patient_id="PT-NONE", age=45, prior_treatment_regimen="none")
+        self.assertIsNone(patient.prior_treatment_regimen)
+
     def test_batch_rejects_invalid_boolean(self):
         csv_sample = (
             "patient_id,age,wbc_count,serum_creatinine,inpatient_or_nursing_home\n"
