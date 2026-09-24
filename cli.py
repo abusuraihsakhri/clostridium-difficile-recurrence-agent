@@ -51,17 +51,18 @@ def format_report_text(report: AssessmentReport) -> str:
             lines.append(f"    - {crit}")
 
     # 3. Recurrence Risk Stratification
-    lines.append("\n[3] RECURRENCE RISK STRATIFICATION (Multivariable Model)")
-    lines.append(f"  * Recurrence Risk Category: >>> {r.risk_category} RISK <<<")
-    lines.append(f"  * Multivariable Risk Score: {r.risk_score:.2f} points")
-    lines.append(f"  * Estimated Probability of Subsequent Recurrence: {r.predicted_recurrence_probability * 100:.1f}%")
+    lines.append("\n[3] HEURISTIC RECURRENCE-RISK SUMMARY")
+    lines.append(f"  * Heuristic Risk Category: >>> {r.risk_category} RISK <<<")
+    lines.append(f"  * Heuristic Risk Score: {r.risk_score:.2f} points")
+    lines.append(f"  * Legacy Numeric Estimate: {r.predicted_recurrence_probability * 100:.1f}%")
+    lines.append(f"  * Model Notice: {r.model_notice}")
     if r.contributing_risk_factors:
         lines.append("  * Contributing Risk Factors:")
         for factor in r.contributing_risk_factors:
             lines.append(f"    - (+{factor['points']:.1f} pts) {factor['factor']}: {factor['detail']}")
 
     # 4. Treatment Recommendations
-    lines.append("\n[4] EVIDENCE-BASED THERAPEUTIC REGIMEN")
+    lines.append("\n[4] GUIDELINE-REFERENCED THERAPEUTIC OPTIONS")
     lines.append(f"  * Primary Regimen:     {t.primary_regimen}")
     lines.append(f"    Dosage:              {t.primary_dosage}")
     lines.append(f"    Duration:            {t.primary_duration}")
@@ -72,13 +73,13 @@ def format_report_text(report: AssessmentReport) -> str:
 
     # 5. Bezlotoxumab and FMT
     lines.append("\n[5] ADJUNCTIVE BIOLOGICS & MICROBIOTA RESTORATION")
-    lines.append(f"  * Bezlotoxumab (ZINPLAVA) Indicated: {'YES' if t.bezlotoxumab_indicated else 'NO'}")
+    lines.append(f"  * Bezlotoxumab Consideration Flag: {'YES' if t.bezlotoxumab_indicated else 'NO'}")
     if t.bezlotoxumab_rationale:
         lines.append(f"    Rationale: {t.bezlotoxumab_rationale}")
     if t.bezlotoxumab_warning:
         lines.append(f"    WARNING:   {t.bezlotoxumab_warning}")
 
-    lines.append(f"  * FMT / Live Biotherapeutic Product Candidacy: {'QUALIFIED CANDIDATE' if t.fmt_candidacy else 'NOT CANDIDATE AT PRESENT'}")
+    lines.append(f"  * Fecal Microbiota-Based Therapy Evaluation Flag: {'YES' if t.fmt_candidacy else 'NO'}")
     if t.fmt_rationale:
         lines.append(f"    Rationale: {t.fmt_rationale}")
     if t.live_biotherapeutic_options:

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "clostridium-difficile-recurrence-engine"
-version = "2.1.0"
+version = "2.1.1"
 description = "Deterministic adult CDI severity classification, recurrence-risk heuristics, and guideline-referenced treatment option summaries."
 readme = "README.md"
 authors = [{ name = "Abu Suraih Sakhri" }]
