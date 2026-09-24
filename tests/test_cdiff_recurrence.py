@@ -461,7 +461,9 @@ class TestCDiffSerializationAndBatch(unittest.TestCase):
         report = CDiffRecurrenceEngine.evaluate(patient)
         txt = format_report_text(report)
         self.assertIn("CLOSTRIDIOIDES DIFFICILE CLINICAL DECISION SUPPORT REPORT", txt)
-        self.assertIn("QUALIFIED CANDIDATE", txt)
+        self.assertIn("HEURISTIC RECURRENCE-RISK SUMMARY", txt)
+        self.assertIn("not a validated or calibrated clinical prediction model", txt)
+        self.assertIn("Fecal Microbiota-Based Therapy Evaluation Flag: YES", txt)
         self.assertIn("VOWST", txt)
 
 
