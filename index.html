@@ -1,0 +1,438 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="description" content="Adult Clostridioides difficile severity and recurrence-risk decision-support calculator.">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'unsafe-inline'; img-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'">
+  <title>C. difficile Recurrence & Severity Tool</title>
+  <style>
+    :root {
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: #172033;
+      background: #f4f7fb;
+      --bg: #f4f7fb;
+      --surface: #ffffff;
+      --surface-soft: #f8fafc;
+      --border: #dbe3ee;
+      --text: #172033;
+      --muted: #607089;
+      --accent: #175cd3;
+      --accent-soft: #eaf2ff;
+      --danger: #b42318;
+      --danger-soft: #fff0ee;
+      --success: #067647;
+      --success-soft: #ecfdf3;
+      --shadow: 0 14px 38px rgba(31, 45, 61, 0.08);
+    }
+    :root[data-theme="dark"] {
+      color: #e8eef7;
+      background: #0f1724;
+      --bg: #0f1724;
+      --surface: #151f2f;
+      --surface-soft: #111a28;
+      --border: #2d3b50;
+      --text: #e8eef7;
+      --muted: #a8b5c7;
+      --accent: #84adff;
+      --accent-soft: #172a4c;
+      --danger: #ffb4ab;
+      --danger-soft: #3b1d1d;
+      --success: #75e0a7;
+      --success-soft: #123227;
+      --shadow: 0 18px 45px rgba(0, 0, 0, 0.24);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+    }
+    button, input, select { font: inherit; }
+    button, input, select, summary { outline-offset: 3px; }
+    button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-visible {
+      outline: 3px solid color-mix(in srgb, var(--accent) 42%, transparent);
+    }
+    .shell {
+      width: min(1480px, 100%);
+      min-height: 100vh;
+      margin: 0 auto;
+      padding: 16px;
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      gap: 12px;
+    }
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+    .title-wrap { min-width: 0; }
+    h1 {
+      margin: 0;
+      font-size: clamp(1.3rem, 1.7vw, 1.8rem);
+      letter-spacing: -0.025em;
+    }
+    .subtitle {
+      margin: 4px 0 0;
+      color: var(--muted);
+      font-size: 0.88rem;
+    }
+    .toolbar { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+    .button {
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--text);
+      border-radius: 10px;
+      min-height: 40px;
+      padding: 0 14px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .button:hover { border-color: var(--accent); }
+    .button.primary {
+      color: white;
+      background: #175cd3;
+      border-color: #175cd3;
+    }
+    :root[data-theme="dark"] .button.primary {
+      color: #0f1724;
+      background: #84adff;
+      border-color: #84adff;
+    }
+    main {
+      min-height: 0;
+      display: grid;
+      grid-template-columns: minmax(460px, 0.94fr) minmax(500px, 1.06fr);
+      gap: 12px;
+    }
+    .panel {
+      min-height: 0;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+    .panel-inner {
+      height: 100%;
+      overflow: auto;
+      padding: 16px;
+    }
+    .section-head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+    .section-head h2 { margin: 0; font-size: 1rem; }
+    .section-head span { color: var(--muted); font-size: 0.78rem; }
+    .form-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .field label {
+      display: block;
+      margin-bottom: 5px;
+      color: var(--muted);
+      font-size: 0.78rem;
+      font-weight: 700;
+    }
+    .field input, .field select {
+      width: 100%;
+      min-height: 41px;
+      border: 1px solid var(--border);
+      background: var(--surface-soft);
+      color: var(--text);
+      border-radius: 9px;
+      padding: 8px 10px;
+    }
+    fieldset {
+      min-width: 0;
+      margin: 12px 0 0;
+      padding: 10px 12px 12px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+    }
+    legend {
+      padding: 0 6px;
+      color: var(--muted);
+      font-size: 0.78rem;
+      font-weight: 800;
+    }
+    .checks {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+    }
+    .check {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      min-height: 40px;
+      padding: 8px;
+      border: 1px solid var(--border);
+      border-radius: 9px;
+      background: var(--surface-soft);
+      font-size: 0.78rem;
+      line-height: 1.25;
+    }
+    .check input { margin-top: 2px; }
+    details {
+      margin-top: 12px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: var(--surface-soft);
+    }
+    summary {
+      cursor: pointer;
+      padding: 10px 12px;
+      font-weight: 800;
+      font-size: 0.82rem;
+    }
+    .advanced { padding: 0 12px 12px; }
+    .advanced .checks { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: 10px; }
+    .actions {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px;
+      margin-top: 12px;
+    }
+    .status {
+      margin-bottom: 12px;
+      padding: 9px 11px;
+      border-radius: 10px;
+      font-size: 0.8rem;
+      font-weight: 800;
+      background: var(--success-soft);
+      color: var(--success);
+      border: 1px solid color-mix(in srgb, var(--success) 25%, var(--border));
+    }
+    .status[data-state="urgent"], .status[data-state="error"] {
+      background: var(--danger-soft);
+      color: var(--danger);
+      border-color: color-mix(in srgb, var(--danger) 25%, var(--border));
+    }
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .metric {
+      padding: 12px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: var(--surface-soft);
+    }
+    .metric .label { color: var(--muted); font-size: 0.72rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em; }
+    .metric .value { margin-top: 4px; font-size: 1.24rem; font-weight: 850; }
+    .metric p { margin: 6px 0 0; color: var(--muted); font-size: 0.76rem; line-height: 1.4; }
+    .result-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-top: 10px;
+    }
+    .result-card {
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 12px;
+      background: var(--surface-soft);
+    }
+    .result-card h3 { margin: 0 0 6px; font-size: 0.82rem; }
+    .result-card p, .result-card li {
+      color: var(--muted);
+      font-size: 0.76rem;
+      line-height: 1.45;
+    }
+    .result-card p { margin: 0; }
+    .result-card ul { margin: 6px 0 0; padding-left: 18px; }
+    .span-2 { grid-column: 1 / -1; }
+    .error {
+      margin-top: 10px;
+      padding: 9px 11px;
+      border-radius: 10px;
+      color: var(--danger);
+      background: var(--danger-soft);
+      border: 1px solid color-mix(in srgb, var(--danger) 25%, var(--border));
+      font-size: 0.8rem;
+      font-weight: 700;
+    }
+    footer {
+      color: var(--muted);
+      font-size: 0.72rem;
+      line-height: 1.4;
+    }
+    footer strong { color: var(--text); }
+    @media (min-width: 901px) {
+      .shell { height: 100vh; }
+      body { overflow: hidden; }
+    }
+    @media (max-width: 900px) {
+      .shell { padding: 12px; }
+      header { align-items: flex-start; }
+      main { grid-template-columns: 1fr; }
+      .panel-inner { overflow: visible; }
+    }
+    @media (max-width: 620px) {
+      header { flex-direction: column; }
+      .toolbar { width: 100%; justify-content: stretch; }
+      .toolbar .button { flex: 1; }
+      .form-grid, .metrics, .result-grid { grid-template-columns: 1fr; }
+      .checks, .advanced .checks { grid-template-columns: 1fr; }
+      .span-2 { grid-column: auto; }
+      .actions { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header>
+      <div class="title-wrap">
+        <h1>C. difficile Recurrence & Severity Tool</h1>
+        <p class="subtitle">Adult CDI severity classification, recurrence-risk heuristic, and guideline-referenced option summary.</p>
+      </div>
+      <div class="toolbar">
+        <button class="button" type="button" id="theme-toggle" aria-pressed="false">Dark mode</button>
+      </div>
+    </header>
+
+    <main>
+      <section class="panel" aria-labelledby="input-heading">
+        <div class="panel-inner">
+          <div class="section-head">
+            <h2 id="input-heading">Assessment inputs</h2>
+            <span>Adults ≥18 years</span>
+          </div>
+
+          <form id="assessment-form">
+            <div class="form-grid">
+              <div class="field">
+                <label for="age">Age, years</label>
+                <input id="age" type="number" min="18" max="130" step="1" value="65" required>
+              </div>
+              <div class="field">
+                <label for="prior-episodes">Prior CDI episodes</label>
+                <input id="prior-episodes" type="number" min="0" step="1" value="0" required>
+              </div>
+              <div class="field">
+                <label for="wbc">WBC, ×10³/µL</label>
+                <input id="wbc" type="number" min="0" step="0.1" value="12.0" required>
+              </div>
+              <div class="field">
+                <label for="creatinine">Serum creatinine, mg/dL</label>
+                <input id="creatinine" type="number" min="0" step="0.01" value="1.2" required>
+              </div>
+            </div>
+
+            <fieldset>
+              <legend>Fulminant CDI criteria</legend>
+              <div class="checks">
+                <label class="check"><input id="shock" type="checkbox">Hypotension or shock</label>
+                <label class="check"><input id="ileus" type="checkbox">Ileus</label>
+                <label class="check"><input id="megacolon" type="checkbox">Toxic megacolon</label>
+              </div>
+            </fieldset>
+
+            <details>
+              <summary>Additional recurrence-risk and treatment context</summary>
+              <div class="advanced">
+                <div class="form-grid">
+                  <div class="field">
+                    <label for="albumin">Albumin, g/dL (optional)</label>
+                    <input id="albumin" type="number" min="0.1" step="0.1" placeholder="Not supplied">
+                  </div>
+                  <div class="field">
+                    <label for="lactate">Lactate, mmol/L (optional)</label>
+                    <input id="lactate" type="number" min="0" step="0.1" placeholder="Not supplied">
+                  </div>
+                  <div class="field">
+                    <label for="prior-regimen">Prior CDI regimen</label>
+                    <select id="prior-regimen">
+                      <option value="">Not specified</option>
+                      <option value="fidaxomicin">Fidaxomicin</option>
+                      <option value="vancomycin">Vancomycin</option>
+                      <option value="metronidazole">Metronidazole</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="checks">
+                  <label class="check"><input id="concomitant-abx" type="checkbox">Concomitant non-CDI antibiotics</label>
+                  <label class="check"><input id="immunocompromised" type="checkbox">Immunocompromised</label>
+                  <label class="check"><input id="ppi" type="checkbox">PPI exposure</label>
+                  <label class="check"><input id="ckd" type="checkbox">CKD stage ≥3</label>
+                  <label class="check"><input id="inpatient" type="checkbox">Inpatient/LTCF exposure</label>
+                  <label class="check"><input id="chf" type="checkbox">History of congestive heart failure</label>
+                </div>
+              </div>
+            </details>
+
+            <div id="error-box" class="error" role="alert" hidden></div>
+            <div class="actions">
+              <button class="button primary" type="submit">Analyze</button>
+              <button class="button" type="button" id="reset-button">Reset</button>
+            </div>
+          </form>
+        </div>
+      </section>
+
+      <section class="panel" aria-labelledby="result-heading">
+        <div class="panel-inner" aria-live="polite">
+          <div class="section-head">
+            <h2 id="result-heading">Result</h2>
+            <span>Decision support only</span>
+          </div>
+
+          <div class="status" id="status-box" data-state="ready">Assessment complete</div>
+
+          <div class="metrics">
+            <div class="metric">
+              <div class="label">Severity</div>
+              <div class="value" id="severity-value">—</div>
+              <p id="severity-summary">Enter values and select Analyze.</p>
+            </div>
+            <div class="metric">
+              <div class="label">Recurrence risk band</div>
+              <div class="value" id="risk-value">—</div>
+              <p id="risk-meta">The recurrence model is a repository-specific heuristic.</p>
+            </div>
+          </div>
+
+          <div class="result-grid">
+            <article class="result-card">
+              <h3>Primary guideline option</h3>
+              <p id="primary-plan">—</p>
+            </article>
+            <article class="result-card">
+              <h3>Alternative option</h3>
+              <p id="alternative-plan">—</p>
+            </article>
+            <article class="result-card">
+              <h3>Bezlotoxumab consideration</h3>
+              <p id="adjunct-plan">—</p>
+            </article>
+            <article class="result-card">
+              <h3>Fecal microbiota-based therapy</h3>
+              <p id="fmt-plan">—</p>
+            </article>
+            <article class="result-card span-2">
+              <h3>Heuristic risk factors selected</h3>
+              <ul id="factor-list"></ul>
+            </article>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <strong>Scope:</strong> adult educational/research decision support. The severity rules follow the IDSA/SHEA adult framework; the numeric recurrence estimate is not a validated calibrated prediction model. Treatment selections require clinician judgment, current product labeling, contraindication review, and local policy. Inputs stay in the browser; this page does not transmit case data to a server.
+    </footer>
+  </div>
+  <script type="module" src="./web/app.mjs"></script>
+</body>
+</html>
