@@ -21,7 +21,13 @@ A deterministic decision-support tool for adult *Clostridioides difficile* infec
 
 ## Browser application
 
-Open `index.html` locally in a modern browser, or use the GitHub Pages deployment after it has been enabled for this repository.
+For local browser testing, serve the repository over HTTP (ES modules are not reliably loaded from `file://` URLs):
+
+```bash
+python -m http.server 8000
+```
+
+Then open `http://localhost:8000/`. The same static files are deployed by the GitHub Pages workflow.
 
 The browser implementation uses small ES modules rather than Pyodide. The underlying algorithm is deterministic and uses only standard arithmetic and rules, so a JavaScript mirror avoids the large WebAssembly/Python runtime download while preserving the same classification thresholds and decision-support logic. Browser-engine smoke tests run in CI.
 
