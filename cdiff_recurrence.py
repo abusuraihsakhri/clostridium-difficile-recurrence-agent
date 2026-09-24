@@ -12,12 +12,11 @@ Pure Python Standard Library (no external dependencies required).
 """
 
 from dataclasses import dataclass, field, asdict
-from typing import Dict, Any, List, Optional, Tuple, Union
+from typing import Dict, Any, List, Optional
 import math
 import json
 import csv
 import io
-import sys
 
 
 @dataclass
@@ -38,8 +37,8 @@ class PatientInput:
     hypotension_or_shock: bool = False  # SBP < 90 mmHg or vasopressor requirement
     ileus_present: bool = False  # clinical/radiologic ileus
     toxic_megacolon: bool = False  # colonic dilation > 6 cm with toxicity
-    serum_lactate: Optional[float] = None  # mmol/L (lactate >= 5.0 indicates fulminant)
-    history_congestive_heart_failure: bool = False  # for Bezlotoxumab black-box warning
+    serum_lactate: Optional[float] = None  # mmol/L; contextual severity marker
+    history_congestive_heart_failure: bool = False  # for bezlotoxumab heart-failure precaution
     prior_treatment_regimen: Optional[str] = None  # 'vancomycin', 'fidaxomicin', 'metronidazole', None
 
     def __post_init__(self) -> None:
@@ -84,7 +83,7 @@ class SeverityAssessment:
 
 @dataclass
 class RecurrenceRiskAssessment:
-    """Multivariable risk score and statistical probability of recurrence."""
+    """Repository-specific recurrence-risk heuristic and legacy numeric estimate."""
     risk_score: float
     risk_category: str  # 'LOW', 'MODERATE', 'HIGH', 'VERY_HIGH'
     predicted_recurrence_probability: float  # 0.0 to 1.0 (percentage)
@@ -172,7 +171,7 @@ class CDiffRecurrenceEngine:
             is_ful = False
             reasons = []
             if wbc_flag:
-                reasons.append(f"Leukocytosis (WBC {patient.wbc_count:.1f} >= 15.0 x 10^3/uL)")
+                reasons.append(f"Leukocytosis (WBC {patient.wbc_count:.1f} > 15.0 x 10^3/uL)")
             if cr_flag:
                 reasons.append(f"Renal impairment (Serum Cr {patient.serum_creatinine:.2f} mg/dL)")
             summary = f"Severe C. difficile infection: {', '.join(reasons)}."
@@ -346,14 +345,14 @@ class CDiffRecurrenceEngine:
         risk: RecurrenceRiskAssessment
     ) -> TreatmentGuidelineRecommendation:
         """
-        Generate IDSA/SHEA 2021 & ACG compliant therapeutic plans,
-        Bezlotoxumab evaluation, and FMT / Live Biotherapeutic candidacy.
+        Generate guideline-referenced therapeutic option summaries,
+        bezlotoxumab consideration, and fecal microbiota-based therapy candidacy.
         """
         # 1. Primary & Alternative Regimens based on episode stage and severity
         if severity.is_fulminant:
             primary_reg = "Oral Vancomycin PLUS Intravenous Metronidazole"
             primary_dose = "Vancomycin 500 mg orally/nasogastrically Q6H (QID) + Metronidazole 500 mg IV Q8H (TID)"
-            primary_dur = "14 days (or until clinical resolution; re-evaluate daily)"
+            primary_dur = "Duration should follow current guideline/local protocol and clinical response"
             
             alt_reg = "Vancomycin Oral + IV Metronidazole + Vancomycin Retention Enema"
             alt_dose = "If ileus present: Add Vancomycin 500 mg in 100 mL normal saline PR every 6 hours via rectal catheter"
