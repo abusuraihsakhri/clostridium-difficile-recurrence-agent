@@ -2,10 +2,10 @@
 """
 Clostridioides (Clostridium) difficile Recurrence & Clinical Severity Engine
 ----------------------------------------------------------------------------
-Implements evidence-based clinical decision support based on IDSA/SHEA 2021
-and ACG guidelines, multivariable recurrence risk stratification (Hu et al.,
-Garey et al.), Bezlotoxumab criteria, and Fecal Microbiota Transplantation
-(FMT) / Live Biotherapeutic Product (VOWST, REBYOTA) candidacy triage.
+Implements adult CDI severity rules based on IDSA/SHEA guidance, a
+repository-specific recurrence-risk heuristic, guideline-referenced treatment
+option summaries, bezlotoxumab consideration, and fecal microbiota-based
+therapy candidacy triage.
 
 Domain: Infectious Diseases / Gastroenterology
 Pure Python Standard Library (no external dependencies required).
@@ -86,7 +86,7 @@ class RecurrenceRiskAssessment:
     """Repository-specific recurrence-risk heuristic and legacy numeric estimate."""
     risk_score: float
     risk_category: str  # 'LOW', 'MODERATE', 'HIGH', 'VERY_HIGH'
-    predicted_recurrence_probability: float  # 0.0 to 1.0 (percentage)
+    predicted_recurrence_probability: float  # legacy heuristic estimate from 0.0 to 1.0
     contributing_risk_factors: List[Dict[str, Any]] = field(default_factory=list)
     recurrent_episode_type: str = "PRIMARY"  # 'PRIMARY', 'FIRST_RECURRENCE', 'MULTIPLE_RECURRENCE'
     model_notice: str = (
@@ -134,7 +134,7 @@ class AssessmentReport:
 class CDiffRecurrenceEngine:
     """
     Core algorithmic engine for C. difficile severity classification,
-    recurrence risk calculation, and guideline-adherent therapeutic mapping.
+    recurrence-risk heuristic calculation, and guideline-referenced therapeutic mapping.
     """
 
     @staticmethod
